@@ -19,7 +19,7 @@ load_dotenv(find_dotenv(), override=True)
 SEARCH_ENDPOINT = os.environ["AZURE_SEARCH_ENDPOINT"]
 SEARCH_INDEX    = os.environ["AZURE_SEARCH_INDEX"]
 SEARCH_KEY      = os.getenv("AZURE_SEARCH_API_KEY")  # omit if using AAD/RBAC
-VECTOR_FIELD    = os.getenv("VECTOR_FIELD", "text_vector")
+VECTOR_FIELD    = os.getenv("VECTOR_FIELD", "text_vector_v4")
 TEXT_FIELD      = os.getenv("TEXT_FIELD", "chunk")
 
 AOAI_ENDPOINT   = os.environ["AZURE_OPENAI_ENDPOINT"]            # https://<resource>.openai.azure.com
@@ -179,7 +179,8 @@ def rag_answer(question: str, k: int = 5, temperature: float = 0.2):
     ctx = build_context(hits)
 
     system_msg = (
-        "You are a helpful analyst. Use ONLY the provided context to answer. "
+        "You are a financial analyst. Use ONLY the provided context to answer. "
+        "All the files that you will be working with and PROVIDED in the context are annual reports. The name of the company that own the annual report is in the first page."
         "Cite sources using [#] that match the snippet numbers. "
         "If the answer isn't in the context, say you don't know."
     )

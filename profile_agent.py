@@ -25,8 +25,8 @@ load_dotenv(find_dotenv(), override=True)
 SEARCH_ENDPOINT = os.environ["AZURE_SEARCH_ENDPOINT"]
 SEARCH_INDEX    = os.environ["AZURE_SEARCH_INDEX"]
 SEARCH_KEY      = os.getenv("AZURE_SEARCH_API_KEY")  # omit if using AAD/RBAC
-VECTOR_FIELD    = os.getenv("VECTOR_FIELD", "text_vector")
-TEXT_FIELD      = os.getenv("TEXT_FIELD", "chunk")
+VECTOR_FIELD    = os.getenv("VECTOR_FIELD")
+TEXT_FIELD      = os.getenv("TEXT_FIELD")
 
 AOAI_ENDPOINT   = os.environ["AZURE_OPENAI_ENDPOINT"]            # https://<resource>.openai.azure.com
 AOAI_API_VER    = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21")
@@ -44,8 +44,13 @@ class profileAgent():
     It is activated by a call on main rag when it is typed 'Create company profile'
     """
 
-    def __init__(self, company_name):
+    def __init__(self, company_name, k, max_text_recall_size, max_chars, model):
         self.company_name = company_name
+
+        self.k = k
+        self.max_text_recall_size = max_text_recall_size
+        self.model = model
+        self.max_chars = max_chars
 
         self.azure_credentials = AzureKeyCredential(SEARCH_KEY) if SEARCH_KEY else DefaultAzureCredential()
         self.search_client = SearchClient(SEARCH_ENDPOINT, SEARCH_INDEX, credential=self.azure_credentials)
@@ -61,10 +66,10 @@ class profileAgent():
             results = sc.search(
                 search_text=query, 
                 vector_queries=[vq], 
-                top=k, 
+                top=self.k, 
                 query_type="semantic",
                 query_caption="extractive", 
-                hybrid_search=HybridSearch(max_text_recall_size=max_text_recall_size),
+                hybrid_search=HybridSearch(max_text_recall_size=self.max_text_recall_size),
                 query_caption_highlight_enabled=True,
                 )
             mode = "hybrid + semantic"
@@ -97,7 +102,7 @@ class profileAgent():
                 continue
             snippet = textwrap.shorten(snippet, width=700, placeholder=" ...")
             block = f"[{i}] title={title!r} | chunk_id={chunk_id} | score={h.get('score'):.4f}\n{snippet}"
-            if total + len(block) > max_chars:
+            if total + len(block) > self.max_chars:
                 break
             total += len(block)
             lines.append(block)
