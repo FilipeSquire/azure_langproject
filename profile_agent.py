@@ -44,7 +44,7 @@ class profileAgent():
     It is activated by a call on main rag when it is typed 'Create company profile'
     """
 
-    def __init__(self, company_name, k, max_text_recall_size, max_chars, model):
+    def __init__(self, company_name, k, max_text_recall_size, max_chars, model, profile_prompt = new_system_finance_prompt):
         self.company_name = company_name
 
         self.k = k
@@ -56,7 +56,7 @@ class profileAgent():
         self.search_client = SearchClient(SEARCH_ENDPOINT, SEARCH_INDEX, credential=self.azure_credentials)
 
         self.az_openai = AzureOpenAI(azure_endpoint=AOAI_ENDPOINT, api_key=AOAI_KEY, api_version=AOAI_API_VER)
-
+        self.profile_prompt = profile_prompt
 
     def _retrieve_hybrid_enhanced(self, query: str, k: int = 10, max_text_recall_size:int = 200):
         sc = self.search_client
@@ -133,7 +133,7 @@ class profileAgent():
         ctx = self._build_context(hits)
 
         system_msg = (
-            new_system_finance_prompt
+            self.profile_prompt
         )
         user_msg = f"Question:\n{question}\n\nContext snippets (numbered):\n{ctx}"
 
