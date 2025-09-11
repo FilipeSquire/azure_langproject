@@ -164,46 +164,30 @@ class profileAgentWeb():
         tools = [{"type": "web_search"}] if self.enable_web_search else []
 
         try:
-            if self.streaming:
-                # Stream tokens (SSE). See Responses streaming docs for structure. :contentReference[oaicite:3]{index=3}
-                stream = self.web_openai.responses.stream(
-                    model=self.model,
-                    input=messages,
-                    tools=tools if tools else None,
-                    tool_choice=self.tool_choice if tools else "none",
-                    # temperature=self.temperature,
-                    # top_p=self.top_p,
-                    max_output_tokens=self.max_output_tokens,
-                    reasoning={"effort": self.reasoning_effort},
-                    text={"verbosity": self.verbosity},
-                )
-                stream.until_done()
-                answer_text = stream.get_final_response().output_text
-            else:
-                resp = self.web_openai.responses.create(
-                    model=self.model,
-                    input=messages,
-                    tools=tools if tools else None,
-                    tool_choice=self.tool_choice if tools else "none",
-                    # temperature=self.temperature,
-                    # top_p=self.top_p,
-                    max_output_tokens=self.max_output_tokens,
-                    reasoning={"effort": self.reasoning_effort},
-                    text={"verbosity": self.verbosity},
-                )
-                answer_text = resp.output_text
+            resp = self.web_openai.responses.create(
+                model=self.model,
+                input=messages,
+                tools=tools if tools else None,
+                tool_choice=self.tool_choice if tools else "none",
+                # temperature=self.temperature,
+                # top_p=self.top_p,
+                max_output_tokens=self.max_output_tokens,
+                reasoning={"effort": self.reasoning_effort},
+                text={"verbosity": self.verbosity},
+            )
+            answer_text = resp.output_text
 
-                # (Optional) Collect URL citations if web search was used
-                if tools:
-                    urls = set()
-                    for item in getattr(resp, "output", []) or []:
-                        if getattr(item, "type", "") == "message":
-                            for c in getattr(item, "content", []) or []:
-                                for ann in getattr(c, "annotations", []) or []:
-                                    if getattr(ann, "type", "") == "url_citation" and getattr(ann, "url", None):
-                                        urls.add(ann.url)
-                    if urls:
-                        answer_text += "\n\nSources (web):\n" + "\n".join(f"- {u}" for u in urls)
+            # (Optional) Collect URL citations if web search was used
+            if tools:
+                urls = set()
+                for item in getattr(resp, "output", []) or []:
+                    if getattr(item, "type", "") == "message":
+                        for c in getattr(item, "content", []) or []:
+                            for ann in getattr(c, "annotations", []) or []:
+                                if getattr(ann, "type", "") == "url_citation" and getattr(ann, "url", None):
+                                    urls.add(ann.url)
+                if urls:
+                    answer_text += "\n\nSources (web):\n" + "\n".join(f"- {u}" for u in urls)
 
         except APIConnectionError as e:
             answer_text = f"Connection error calling OpenAI: {e}"

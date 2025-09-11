@@ -172,7 +172,7 @@ def maybe_route_to_action(prompt, client, deployment, k, ts, cs, model_profile) 
             if web_mode:
                 agent1 = profileAgentWeb(
                     company,
-                    k=k, max_text_recall_size=ts, max_chars=cs,
+                    k=k, max_text_recall_size=ts, max_chars=cs, tool_choice={"type": "web_search"},
                     model=model_profile, profile_prompt=st.session_state.profile_mod_web
                 )
             else:
@@ -181,7 +181,7 @@ def maybe_route_to_action(prompt, client, deployment, k, ts, cs, model_profile) 
                     k=k, max_text_recall_size=ts, max_chars=cs,
                     model=model_profile, profile_prompt=st.session_state.profile_mod
                 )
-                
+
             out_pdf = agent1._rag_answer()
 
             st.download_button(
