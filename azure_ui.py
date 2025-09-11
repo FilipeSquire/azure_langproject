@@ -43,7 +43,7 @@ TOOLS = [{
 # =====================================================
 
 st.set_page_config(page_title="Oraculum v2", layout="wide")
-st.title("📄 Oraculum v2 (Azure Version)")
+st.title("📄 Oraculum v2.1 (Azure Version)")
 
 # -------- Session state --------
 if "history" not in st.session_state:
