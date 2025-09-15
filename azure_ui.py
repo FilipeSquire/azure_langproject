@@ -139,11 +139,13 @@ with st.sidebar.expander("Actions", expanded=False):
     st.write('List of possible actions by chat:')
     st.write('1. Create company profile.')
     st.write("To activate it you have to write: 'Create company profile of company_name with latest report'")
-
+    st.write('2. Web Search')
+    st.write("In order to activate this function, state clearly in the request 'use web search'")
+    st.write('3. New Companies')
+    st.write("This function allows you to add new data to the database. Use it by 'add company (companyNumber)', it needs to be the companyNumber of Company House.")
     st.write('Features in development:')
-    st.write('1. Web Search')
-    st.write('2. Feed new file through chat to system')
-    st.write('3. Generate Company Profile PowerPoint')
+    st.write('1. Feed new file through chat to system')
+    st.write('2. Generate Company Profile PowerPoint')
 
 client = get_aoai_client()
 
