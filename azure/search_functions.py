@@ -1,10 +1,13 @@
 import os, time
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.indexes import SearchIndexerClient
+from dotenv import load_dotenv, find_dotenv
+# Or: from azure.identity import DefaultAzureCredential  # if using Entra ID
+load_dotenv(find_dotenv(), override=True)
 
-SEARCH_ENDPOINT = os.getenv["AZURE_SEARCH_ENDPOINT"]         # e.g. https://<svc>.search.windows.net
-INDEXER_NAME    = os.getenv["AZURE_SEARCH_INDEXER"]
-ADMIN_KEY       = os.getenv["AZURE_SEARCH_API_KEY"]        # or use DefaultAzureCredential()
+SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")        # e.g. https://<svc>.search.windows.net
+INDEXER_NAME    = os.getenv("AZURE_SEARCH_INDEXER")
+ADMIN_KEY       = os.getenv("AZURE_SEARCH_API_KEY")        # or use DefaultAzureCredential()
 
 def run_indexer():
 
