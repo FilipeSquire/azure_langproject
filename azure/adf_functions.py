@@ -1,6 +1,6 @@
 import time
 from azure.identity import ClientSecretCredential
-from azure.mgmt.datafactory import DataFactoryManagementClient
+# from azure.mgmt.datafactory import DataFactoryManagementClient
 # import azure.functions as func
 import requests
 import os 
