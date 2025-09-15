@@ -129,7 +129,12 @@ class profileAgent():
     def _rag_answer(self, k: int = 5, temperature: float = 0.2):
         question = f'Create the company profile of {self.company_name}. USE ONLY the information from latest annual report.'
 
-        mode, hits = self._retrieve_hybrid_enhanced(question, k=k)
+        mode, hits = self._retrieve_hybrid_enhanced(
+            text=question, 
+            k=k, 
+            fields=VECTOR_FIELD, 
+            weight=1.8
+            )
         ctx = self._build_context(hits)
 
         system_msg = (

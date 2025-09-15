@@ -37,115 +37,19 @@ def get_aoai_client() -> AzureOpenAI:
         return AzureOpenAI(azure_endpoint=AOAI_ENDPOINT, api_key=AOAI_KEY, api_version=AOAI_API_VER)
     return AzureOpenAI(azure_endpoint=AOAI_ENDPOINT, azure_ad_token_provider=DefaultAzureCredential().get_token, api_version=AOAI_API_VER)
 
-# ---- Retrieval (integrated vectorization first, lexical fallback) ----
-def retrieve(query: str, k: int = 10):
+def retrieve_hybrid_enhanced(query: str, k: int = 50, max_text_recall_size:int = 200):
     sc = get_search_client()
     try:
-        vq = VectorizableTextQuery(text=query, k=k, fields=VECTOR_FIELD)
-        # Prefer vector-only search (integrated vectorization). If your index isn't set up for it, this raises.
-        results = sc.search(
-            search_text=query, 
-            vector_queries=[vq], 
-            top=k,
-            )
-        mode = "vector (integrated)"
-    except HttpResponseError as e:
-        # Fall back to lexical so you still get results while fixing vector config
-        results = sc.search(search_text=query, top=k)
-        mode = f"lexical (fallback due to: {e.__class__.__name__})"
-
-    hits: List[Dict] = []
-    for r in results:
-        d = dict(r)
-        d["score"] = r["@search.score"]
-        hits.append(d)
-    return mode, hits
-
-def retrieve_semantic(query: str, k: int = 10):
-    sc = get_search_client()
-    try:
-        vq = VectorizableTextQuery(text=query, k=k, fields=VECTOR_FIELD)
-        # Prefer vector-only search (integrated vectorization). If your index isn't set up for it, this raises.
-        results = sc.search(
-            search_text=query, 
-            vector_queries=[vq], 
-            top=k, 
-            query_type="semantic",
-            query_caption="extractive", 
-            query_caption_highlight_enabled=True,
-            )
-    except HttpResponseError as e:
-        # Fall back to lexical so you still get results while fixing vector config
-        results = sc.search(search_text=query, top=k)
-        mode = f"lexical (fallback due to: {e.__class__.__name__})"
-
-    hits: List[Dict] = []
-    for r in results:
-        d = r.copy() if hasattr(r, "copy") else {key: r[key] for key in r}
-        # Prefer semantic reranker score when present
-        d["score"] = d.get("@search.reranker_score", d.get("@search.score"))
-        # Pull first caption if present
-        caps = d.get("@search.captions")
-        if isinstance(caps, list) and caps:
-            cap0 = caps[0]
-            d["caption"] = getattr(cap0, "text", cap0.get("text") if isinstance(cap0, dict) else None)
-        hits.append(d)
-    return "semantic-only", hits
-
-def retrieve_hybrid(query: str, k: int = 10):
-    sc = get_search_client()
-    try:
-        vq = VectorizableTextQuery(text=query, k=k, fields=VECTOR_FIELD)
-        # Prefer vector-only search (integrated vectorization). If your index isn't set up for it, this raises.
-        results = sc.search(
-            search_text=query, 
-            vector_queries=[vq], 
-            top=k, 
-            query_type="semantic",
-            query_caption="extractive", 
-            query_caption_highlight_enabled=True,
-            )
-        mode = "hybrid + semantic"
-    except HttpResponseError as e:
-        # Fall back to lexical so you still get results while fixing vector config
-        results = sc.search(search_text=query, top=k)
-        mode = f"lexical (fallback due to: {e.__class__.__name__})"
-
-    hits: List[Dict] = []
-    for r in results:
-        d = r.copy() if hasattr(r, "copy") else {k2: r[k2] for k2 in r}
-        d["score"] = d.get("@search.reranker_score") or d.get("@search.score") or 0.0
-        caps = d.get("@search.captions")
-        if isinstance(caps, list) and caps:
-            cap0 = caps[0]                 # QueryCaptionResult
-            d["caption"] = getattr(cap0, "text", None)
-        hits.append(d)
-
-    return mode, hits
-
-
-
-def retrieve_hybrid_enhanced(query: str, top: int = 20, k: int = 50, max_text_recall_size:int = 200):
-    sc = get_search_client()
-    try:
-        vq = VectorizableTextQuery(
-            text=query, 
-            k=k, 
-            fields=VECTOR_FIELD, 
-            weight=1.8
-            )
-        
+        vq = VectorizableTextQuery(text=query, k=k, fields=VECTOR_FIELD, weight=1.8)
         # Prefer vector-only search (integrated vectorization). If your index isn't set up for it, this raises.
         results = sc.search(
             search_text=query, 
             vector_queries=[vq],
-            top=top, 
+            top=k, 
             query_type="semantic",
             query_caption="extractive", 
-            query_answer='extractive',
             hybrid_search=HybridSearch(max_text_recall_size=max_text_recall_size),
             query_caption_highlight_enabled=True,
-            semantic_error_mode="partial"
             )
         mode = "hybrid + semantic"
     except HttpResponseError as e:
@@ -184,7 +88,7 @@ def build_context(hits: List[Dict], text_field: str = TEXT_FIELD, max_chars: int
 
 # ---- RAG ask with streaming + non-streaming fallback ----
 def rag_answer(question: str, k: int = 5, temperature: float = 0.2):
-    mode, hits = retrieve(question, k=k)
+    mode, hits = retrieve_hybrid_enhanced(question, k=k)
     ctx = build_context(hits)
 
     system_msg = (
