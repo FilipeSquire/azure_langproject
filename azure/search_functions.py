@@ -2,9 +2,9 @@ import os, time
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.indexes import SearchIndexerClient
 
-SEARCH_ENDPOINT = os.environ["AZURE_SEARCH_ENDPOINT"]         # e.g. https://<svc>.search.windows.net
-INDEXER_NAME    = os.environ["AZURE_SEARCH_INDEXER"]
-ADMIN_KEY       = os.environ["AZURE_SEARCH_API_KEY"]        # or use DefaultAzureCredential()
+SEARCH_ENDPOINT = os.getenv["AZURE_SEARCH_ENDPOINT"]         # e.g. https://<svc>.search.windows.net
+INDEXER_NAME    = os.getenv["AZURE_SEARCH_INDEXER"]
+ADMIN_KEY       = os.getenv["AZURE_SEARCH_API_KEY"]        # or use DefaultAzureCredential()
 
 def run_indexer():
 
