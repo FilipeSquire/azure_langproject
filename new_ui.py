@@ -34,19 +34,19 @@ import time
 load_dotenv(find_dotenv(), override=True)
 # =====================================================
 # GPT TOOLS 
-TOOLS = [{
-    "type": "function",
-    "function": {
-        "name": "create_company_profile",
-        "description": "Call when the user says something similar to: 'Create a company profile (CompanyName)'. Extract the name inside parentheses.",
-        "parameters": {
-            "type": "object",
-            "properties": {"companyName": {"type": "string"}},
-            "required": ["companyName"],
-            "additionalProperties": False,
-        },
-    },
-}]
+# TOOLS = [{
+#     "type": "function",
+#     "function": {
+#         "name": "create_company_profile",
+#         "description": "Call when the user says something similar to: 'Create a company profile (CompanyName)'. Extract the name inside parentheses.",
+#         "parameters": {
+#             "type": "object",
+#             "properties": {"companyName": {"type": "string"}},
+#             "required": ["companyName"],
+#             "additionalProperties": False,
+#         },
+#     },
+# }]
 # =====================================================
 
 st.set_page_config(page_title="Oraculum v2", layout="wide")
