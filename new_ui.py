@@ -28,25 +28,25 @@ from azure.blob_functions import companyHouseListAdd
 from azure.adf_functions import trigger_function
 from azure.search_functions import run_indexer
 from gpts.gpt_assistants import question_to_machine
-
+from io import BytesIO
+from typing import Tuple
 import time
+from engines.hybrig_eng_enhanced import HybridEngine
+
 
 load_dotenv(find_dotenv(), override=True)
 # =====================================================
 # GPT TOOLS 
-# TOOLS = [{
-#     "type": "function",
-#     "function": {
-#         "name": "create_company_profile",
-#         "description": "Call when the user says something similar to: 'Create a company profile (CompanyName)'. Extract the name inside parentheses.",
-#         "parameters": {
-#             "type": "object",
-#             "properties": {"companyName": {"type": "string"}},
-#             "required": ["companyName"],
-#             "additionalProperties": False,
-#         },
-#     },
-# }]
+@st.cache_resource(show_spinner=False)
+def ocr_engine_cached_multi(files_bytes: Tuple[bytes, ...], files_names: Tuple[str, ...]):
+    """Multi-file OCR mode via HybridEngine (idempotent + timed)."""
+    pdf_streams = tuple((BytesIO(b), n) for b, n in zip(files_bytes, files_names))
+    engine = HybridEngine(pdf_streams)
+    t0 = time.perf_counter(); engine.main(); build_s = time.perf_counter() - t0
+    timings = getattr(engine, "timings", {})
+    timings["total_build_s"] = build_s
+    return engine.chain, engine.chain_with_sources, timings
+
 # =====================================================
 
 st.set_page_config(page_title="Oraculum v2", layout="wide")
@@ -72,6 +72,20 @@ if "profile_mod" not in st.session_state:
     st.session_state.profile_mod = new_system_finance_prompt
 if "profile_mod_web" not in st.session_state:
     st.session_state.profile_mod_web = finance_prompt_web
+
+if "pdf_mod" not in st.session_state:
+    st.session_state.pdf_mod = False
+if "just_ingested" not in st.session_state:
+    st.session_state.just_ingested = False
+if "just_ingested_msg" not in st.session_state:
+    st.session_state.just_ingested_msg = ""
+
+if "ocr_chain" not in st.session_state:
+    st.session_state.ocr_chain = None
+if "ocr_chain_with_sources" not in st.session_state:
+    st.session_state.ocr_chain_with_sources = None
+if "ocr_timings" not in st.session_state:
+    st.session_state.ocr_timings = None
 
 output_placeholder = st.empty()
 apply_theme(st.session_state.theme)
@@ -152,6 +166,54 @@ with st.sidebar.expander("Actions", expanded=False):
     st.write('1. Feed new file through chat to system')
     st.write('2. Generate Company Profile PowerPoint')
 
+with st.sidebar.expander("Feed Your PDF", expanded=False):
+    # Allow one or more PDFs
+    pdf_files = st.file_uploader(
+        "Upload PDF file(s)",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="pdf_uploader",
+        help="Drop one or more PDF annual reports here.",
+    )
+
+    colA, colB = st.columns(2)
+    with colA:
+        run = st.button("Run ingestion", use_container_width=True, key="ingest_btn")
+    with colB:
+        clear = st.button("Clear PDFs", use_container_width=True, key="clear_pdfs")
+
+
+    if run:
+        if not pdf_files:
+            st.warning("Please upload at least one PDF before running ingestion.")
+        else:
+            # Build bytes + names tuples for OCR engine
+            files_bytes: Tuple[bytes, ...] = tuple(f.getvalue() for f in pdf_files)   # UploadedFile behaves like BytesIO. :contentReference[oaicite:3]{index=3}
+            files_names: Tuple[str,  ...] = tuple(f.name for f in pdf_files)          # Filename via .name. :contentReference[oaicite:4]{index=4}
+
+            # Run your OCR engine (synchronous here)
+            chain, chain_src, timings = ocr_engine_cached_multi(files_bytes, files_names)
+            st.session_state.ocr_chain = chain
+            st.session_state.ocr_chain_with_sources = chain_src
+            st.session_state.ocr_timings = timings
+
+            # Flip flag, clear chat, set banner, and rerun
+            st.session_state.pdf_mod = True
+            st.session_state.history = []  # wipe prior chat so the banner is first
+            st.session_state.just_ingested = True
+            st.session_state.just_ingested_msg = "Your file have been ingested. Im ready for questions!"
+            st.rerun()  # immediately rerun after ingestion. :contentReference[oaicite:5]{index=5}
+
+
+    if clear and st.session_state.pdf_mod:
+        # Reset everything related to PDF mode
+        st.session_state.pdf_mod = False
+        st.session_state.ocr_chain = None
+        st.session_state.ocr_chain_with_sources = None
+        st.session_state.ocr_timings = None
+        st.session_state.history = []
+        st.rerun()
+
 client = get_aoai_client()
 
 # ========================================
@@ -167,18 +229,11 @@ def check_actions(prompt, client, deployment, k, ts, cs, model_profile) -> bool:
             args = json.loads(call.function.arguments or "{}")
             company = args.get("companyName") or "(unknown)"
 
-            if web_mode:
-                agent1 = profileAgentWeb(
-                    company,
-                    k=k, max_text_recall_size=ts, max_chars=cs, tool_choice={"type": "web_search"},
-                    model=model_profile, profile_prompt=st.session_state.profile_mod_web
-                )
-            else:
-                agent1 = WebAgent(
-                    company,
-                    k=k, max_text_recall_size=ts, max_chars=cs,
-                    model=model_profile, profile_prompt=st.session_state.profile_mod
-                )
+            agent1 = profileAgent(
+                company,
+                k=k, max_text_recall_size=ts, max_chars=cs, tool_choice={"type": "web_search"},
+                model=model_profile, profile_prompt=st.session_state.profile_mod_web
+            )
 
             out_pdf = agent1._rag_answer()
 
@@ -226,7 +281,6 @@ def check_actions(prompt, client, deployment, k, ts, cs, model_profile) -> bool:
 
 def stream_answer(prompt: str):
 
-
     agent = WebAgent(
         k=k,
         max_text_recall_size=ts,
@@ -261,14 +315,38 @@ for turn in st.session_state.history:
     with st.chat_message("assistant"):
         st.write(turn["a"])
 
+if st.session_state.just_ingested:
+    with st.chat_message("assistant"):
+        st.write(st.session_state.just_ingested_msg)
+    # Reset so it shows only once
+    st.session_state.just_ingested = False
+
 # Accept either a typed prompt or an injected one from sidebar suggestions
-typed = st.chat_input("Ask about the ingested PDFs…")
+placeholder = "Ask a question about your PDFs…" if st.session_state.pdf_mod else "Ask about the ingested PDFs…"
+typed = st.chat_input(placeholder)
 pending = st.session_state.pop("pending_prompt", None)
 prompt = typed or pending
+
+question = st.text_input("Ask a question about your PDFs:")
+if question:
+    res = st.session_state.ocr_chain_with_sources.invoke(question)
+    st.write(res["response"])
 
 if prompt:
     with st.chat_message("user"):
         st.write(prompt)
+
+    if st.session_state.pdf_mod and st.session_state.ocr_chain_with_sources:
+        # ==== PDF PIPELINE ====
+        res = st.session_state.ocr_chain_with_sources.invoke(prompt)
+        answer_text = res.get("response") if isinstance(res, dict) else str(res)
+
+        with st.chat_message("assistant"):
+            st.write(answer_text)
+
+        # Persist in chat history so it shows up next rerun
+        st.session_state.history.append({"q": prompt, "a": answer_text})
+
     with st.chat_message("assistant"):
         # Try tool routing first
         model_profile = "gpt-5" #if model_profile_mod else "o3"
