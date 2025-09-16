@@ -37,15 +37,15 @@ from engines.hybrig_eng_enhanced import HybridEngine
 load_dotenv(find_dotenv(), override=True)
 # =====================================================
 # GPT TOOLS 
-@st.cache_resource(show_spinner=False)
-def ocr_engine_cached_multi(files_bytes: Tuple[bytes, ...], files_names: Tuple[str, ...]):
-    """Multi-file OCR mode via HybridEngine (idempotent + timed)."""
-    pdf_streams = tuple((BytesIO(b), n) for b, n in zip(files_bytes, files_names))
-    engine = HybridEngine(pdf_streams)
-    t0 = time.perf_counter(); engine.main(); build_s = time.perf_counter() - t0
-    timings = getattr(engine, "timings", {})
-    timings["total_build_s"] = build_s
-    return engine.chain, engine.chain_with_sources, timings
+# @st.cache_resource(show_spinner=False)
+# def ocr_engine_cached_multi(files_bytes: Tuple[bytes, ...], files_names: Tuple[str, ...]):
+#     """Multi-file OCR mode via HybridEngine (idempotent + timed)."""
+#     pdf_streams = tuple((BytesIO(b), n) for b, n in zip(files_bytes, files_names))
+#     engine = HybridEngine(pdf_streams)
+#     t0 = time.perf_counter(); engine.main(); build_s = time.perf_counter() - t0
+#     timings = getattr(engine, "timings", {})
+#     timings["total_build_s"] = build_s
+#     return engine.chain, engine.chain_with_sources, timings
 
 # =====================================================
 
@@ -327,25 +327,25 @@ typed = st.chat_input(placeholder)
 pending = st.session_state.pop("pending_prompt", None)
 prompt = typed or pending
 
-question = st.text_input("Ask a question about your PDFs:")
-if question:
-    res = st.session_state.ocr_chain_with_sources.invoke(question)
-    st.write(res["response"])
+# question = st.text_input("Ask a question about your PDFs:")
+# if question:
+#     res = st.session_state.ocr_chain_with_sources.invoke(question)
+#     st.write(res["response"])
 
 if prompt:
     with st.chat_message("user"):
         st.write(prompt)
 
-    if st.session_state.pdf_mod and st.session_state.ocr_chain_with_sources:
-        # ==== PDF PIPELINE ====
-        res = st.session_state.ocr_chain_with_sources.invoke(prompt)
-        answer_text = res.get("response") if isinstance(res, dict) else str(res)
+    # if st.session_state.pdf_mod and st.session_state.ocr_chain_with_sources:
+    #     # ==== PDF PIPELINE ====
+    #     res = st.session_state.ocr_chain_with_sources.invoke(prompt)
+    #     answer_text = res.get("response") if isinstance(res, dict) else str(res)
 
-        with st.chat_message("assistant"):
-            st.write(answer_text)
+    #     with st.chat_message("assistant"):
+    #         st.write(answer_text)
 
-        # Persist in chat history so it shows up next rerun
-        st.session_state.history.append({"q": prompt, "a": answer_text})
+    #     # Persist in chat history so it shows up next rerun
+    #     st.session_state.history.append({"q": prompt, "a": answer_text})
 
     with st.chat_message("assistant"):
         # Try tool routing first
