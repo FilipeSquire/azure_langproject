@@ -58,7 +58,7 @@ class profileAgent():
         self.az_openai = AzureOpenAI(azure_endpoint=AOAI_ENDPOINT, api_key=AOAI_KEY, api_version=AOAI_API_VER)
         self.profile_prompt = profile_prompt
 
-    def _retrieve_hybrid_enhanced(self, query: str, k: int = 10, max_text_recall_size:int = 200):
+    def _retrieve_hybrid_enhanced(self, query: str, k: int = 10, fields=VECTOR_FIELD, max_text_recall_size:int = 200):
         sc = self.search_client
         try:
             vq = VectorizableTextQuery(text=query, k=k, fields=VECTOR_FIELD)
@@ -130,10 +130,8 @@ class profileAgent():
         question = f'Create the company profile of {self.company_name}. USE ONLY the information from latest annual report.'
 
         mode, hits = self._retrieve_hybrid_enhanced(
-            text=question, 
-            k=k, 
-            fields=VECTOR_FIELD, 
-            weight=1.8
+            query=question, 
+            k=k
             )
         ctx = self._build_context(hits)
 

@@ -231,7 +231,7 @@ def check_actions(prompt, client, deployment, k, ts, cs, model_profile) -> bool:
 
             agent1 = profileAgent(
                 company,
-                k=k, max_text_recall_size=ts, max_chars=cs, tool_choice={"type": "web_search"},
+                k=k, max_text_recall_size=ts, max_chars=cs,
                 model=model_profile, profile_prompt=st.session_state.profile_mod_web
             )
 
