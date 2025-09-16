@@ -5,14 +5,15 @@ from dotenv import load_dotenv, find_dotenv
 import json
 from rag import (
     retrieve_hybrid_enhanced,
-    build_context
+    build_context,
+    get_aoai_client
 )
 from typing import List, Dict, Optional
-from rag import retrieve_hybrid_enhanced, build_context
-from gpts.gpt_assistants import question_to_machine
+from gpts.gpt_assistants import question_to_machine, summarizer, general_assistant, maybe_route_to_action
 from openai import OpenAI, APIConnectionError
 import streamlit as st
-
+from prompts import default_gpt_prompt
+import time
 load_dotenv(find_dotenv(), override=True)
 
 # ---- Config (same Azure Search envs you already use) ----
@@ -70,93 +71,120 @@ class WebAgent():
 
         # OpenAI standard client
         self.web_openai = OpenAI(api_key=OPENAI_API_KEY)
+        self.client = get_aoai_client()
+
+    
+    def _web_search(self, messages):
+        resp = self.web_openai.responses.create(
+            model=self.model,
+            input=messages,
+            tools=[{"type": "web_search"}],
+            tool_choice="auto",
+            # max_output_tokens=self.max_output_tokens,
+            reasoning={"effort": self.reasoning_effort},
+            text={"verbosity": self.verbosity},
+        )
+        return resp.output_text
+    
+    def _web_off(self, messages):
+
+        resp_off = self.web_openai.responses.create(
+                model=self.model,
+                input=messages,
+                # max_output_tokens=self.max_output_tokens,
+                reasoning={"effort": "high"},
+                text={"verbosity": self.verbosity},
+                )
+        resp_off_answer = resp_off.output_text
+        return resp_off_answer
 
     def _answer(self, question, stream = False):
 
-        # 1. Identify TOOLS call
+        # 1. TRANSLATE TO MACHINE
 
-        # 2. Optimize call
         opt_user_query = question_to_machine(question, OPENAI_API_KEY)
-
         new_user_query = opt_user_query.output_text
 
-        # 3. Call RAG
+        # 2. TOOL DETECTOR
+
+        calls = maybe_route_to_action(new_user_query, self.client, self.model)
+
+        if calls: #if no action detected, normal proccess
+        # 3. PIPELINE CALL
+            for call in calls:
+                if call.function.name == "web_search":
+
+                    try:
+                        messages = [
+                            {"role": "system", "content": default_gpt_prompt},
+                            {"role": "user",   "content": new_user_query},
+                        ]
+                        
+                        resp = self._web_search(messages)
+                        return resp
+
+                    except Exception as e:
+                        return f'Activated web search but found error {e}'
+                    
+                elif call.function.name == "web_search_duo":
+                    
+                    # SPLITTING THE TEXT FOR EACH SOURCE
+                    instruction = """
+                    You are a financial assistant that receive instructions with multiple sources, and splits the request by source.
+                    GIVE AS OUTPUT the parts of the question that DOESNT require the USE of WEB SEARCH.
+                    """
+                    offline_question = general_assistant(instruction, new_user_query, OPENAI_API_KEY, 'o3')
+                    time.sleep(1.2)
+                    instruction = """
+                    You are a financial assistant that receive instructions with multiple sources, and splits the request by source.
+                    GIVE AS OUTPUT the parts of the question that REQUIRES the use of WEB SEARCH.
+
+                    Transform them into question optimized for web search
+                    """
+                    online_question = general_assistant(instruction, new_user_query, OPENAI_API_KEY, 'o3')
+                    time.sleep(1.2)
+
+                    # RETRIEVING THE ANSWERS
+                    messages = [
+                        {"role": "system", "content": default_gpt_prompt},
+                        {"role": "user",   "content": online_question},
+                    ]
+                    resp_on_answer = self._web_search(messages)
+                    time.sleep(1.2)
+                
+                    mode, hits = retrieve_hybrid_enhanced(query=offline_question, top = self.top, k = self.k, max_text_recall_size = self.max_text_recall_size)
+                    ctx = build_context(hits)
+
+                    user_msg = f"Question:\n{offline_question}\n\nContext snippets (numbered):\n{ctx}"
+
+                    messages = [
+                        {"role": "system", "content": default_gpt_prompt},
+                        {"role": "user",   "content": user_msg},
+                    ]
+                    time.sleep(40)
+                    resp_off_answer = self._web_off(messages=messages)
+                    print('Done resp off')
+
+                    time.sleep(1.2)
+                    summary = summarizer(resp_on_answer, resp_off_answer, OPENAI_API_KEY, self.model)
+
+                    return summary
+        
+        
+        # 2. RETRIEVE
         mode, hits = retrieve_hybrid_enhanced(query=new_user_query, top = self.top, k = self.k, max_text_recall_size = self.max_text_recall_size)
         ctx = build_context(hits)
-        # 4. Call model
+
+        # 3. Call GPT
+        system_msg = default_gpt_prompt
 
         user_msg = f"Question:\n{new_user_query}\n\nContext snippets (numbered):\n{ctx}"
-        system_msg = """"
 
-        You are a restructuring analyst focused on identifying companies in financial distress that could be advisory targets for your company. 
-        You prepare comprehensive, accurate and full analysis of companies highlighting liquidity issues, debt maturity risks and covenant pressure. 
-        You rely on annual reports and financial statements of companies.
-
-        WHEN the information is NOT FOUND in the context, you USE WEB SEARCH
-
-        **Formatting and Editorial Standards**: 
-            - Always **cite sources** 
-            - Generate complete profile directly in the chat, take your time and don't compress important things 
-            - Always write dates in the format "Mmm-yy" (e.g. Jun-24), fiscal years as "FYXX" (e.g. FY24, LTM1H25), and currencies in millions in the format "£1.2m" 
-            - Always double-check revenue split 
-
-        """
         messages = [
             {"role": "system", "content": system_msg},
             {"role": "user",   "content": user_msg},
         ]
-
-        if stream:
-            answer_box = st.empty()
-            full = ""
-            try:
-                with self.web_openai.responses.stream(
-                    model=self.model,
-                    input=messages,
-                    tools=[{"type": "web_search"}],
-                    tool_choice="auto",
-                    # max_output_tokens=self.max_output_tokens,
-                    reasoning={"effort": self.reasoning_effort},
-                    text={"verbosity": self.verbosity},
-                ) as stream:
-                    for event in stream:
-                        if event.type == "response.output_text.delta":
-                            piece = event.delta
-                            if piece:
-                                full += piece
-                                answer_box.markdown(full)
-                        elif event.type == "response.error":
-                            raise RuntimeError(str(event.error))
-                    final = stream.get_final_response()
-                    if not full:
-                        # fallback to final assembled text if no deltas arrived
-                        full = getattr(final, "output_text", "") or ""
-                        answer_box.markdown(full)
-            except APIConnectionError:
-                resp = self.web_openai.responses.create(
-                    model=self.model,
-                    input=messages,
-                    tools=[{"type": "web_search"}],
-                    tool_choice="auto",
-                    # max_output_tokens=self.max_output_tokens,
-                    reasoning={"effort": self.reasoning_effort},
-                    text={"verbosity": self.verbosity},
-                )
-                full = getattr(resp, "output_text", "") or ""
-                answer_box.markdown(full)
-
-            return full
-
         
-        resp = self.web_openai.responses.create(
-                model=self.model,
-                input=messages,
-                tools=[{"type": "web_search"}],
-                tool_choice="auto",
-                # max_output_tokens=self.max_output_tokens,
-                reasoning={"effort": self.reasoning_effort},
-                text={"verbosity": self.verbosity},
-            )
-        answer_text = resp.output_text
+        answer_text = self._web_off(messages=messages)
 
         return answer_text

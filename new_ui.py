@@ -1,11 +1,12 @@
+# app.py
 import os
 import textwrap
 import streamlit as st
 from dotenv import load_dotenv, find_dotenv
 from openai import APIConnectionError
 import json
-from profile_agent import profileAgent
-from profile_agent_web import profileAgentWeb
+import streamlit as st
+
 from rag import (
     retrieve,
     retrieve_hybrid,
@@ -19,8 +20,33 @@ from rag import (
 from theme_mod import apply_theme
 from prompts import new_system_finance_prompt, finance_prompt_web
 
-load_dotenv(find_dotenv(), override=True)
+from profile_agent import profileAgent
+from profile_agent_web import profileAgentWeb
+from gpts.gpt5_web import WebAgent
+from gpts.gpt_assistants import maybe_route_to_action
+from azure.blob_functions import companyHouseListAdd
+from azure.adf_functions import trigger_function
+from azure.search_functions import run_indexer
+from gpts.gpt_assistants import question_to_machine
 
+import time
+
+load_dotenv(find_dotenv(), override=True)
+# =====================================================
+# GPT TOOLS 
+TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "create_company_profile",
+        "description": "Call when the user says something similar to: 'Create a company profile (CompanyName)'. Extract the name inside parentheses.",
+        "parameters": {
+            "type": "object",
+            "properties": {"companyName": {"type": "string"}},
+            "required": ["companyName"],
+            "additionalProperties": False,
+        },
+    },
+}]
 # =====================================================
 
 st.set_page_config(page_title="Oraculum v2", layout="wide")
@@ -50,6 +76,8 @@ if "profile_mod_web" not in st.session_state:
 output_placeholder = st.empty()
 apply_theme(st.session_state.theme)
 
+# =====================================================
+
 # -------- Left sidebar with collapsible sections --------
 with st.sidebar:
     mode = st.session_state.theme
@@ -67,6 +95,9 @@ with st.sidebar.expander("GPT settings", expanded=True):
     cs = st.slider("Max Chars in Context Given to AI ", 500, 15000, 30000)
     st.write('Hard limit the model reads; everything must fit underneath.')
     web_mode = st.checkbox("Activate web search for Profile Creation", value=False)
+    reasoning_effort = st.selectbox("Reasoning effort", ["minimal","low","medium","high"], index=2)
+    verbosity = st.selectbox("Verbosity", ["low","medium","high"], index=1)
+    do_stream = st.checkbox("Stream responses (UI only)", value=False)
     # save_toggle = st.checkbox("Auto-save last answer to Blob", value=False)
     # model_mod = st.checkbox("Use o3 in chat. Defined standard is GPT5.", value=False)
     # model_profile_mod = st.checkbox("Use GPT5 to create Company Profile. Defined standard is o3", value=False)
@@ -113,10 +144,137 @@ with st.sidebar.expander("Actions", expanded=False):
     st.write('List of possible actions by chat:')
     st.write('1. Create company profile.')
     st.write("To activate it you have to write: 'Create company profile of company_name with latest report'")
-
+    st.write('2. Web Search')
+    st.write("In order to activate this function, state clearly in the request 'use web search'")
+    st.write('3. New Companies')
+    st.write("This function allows you to add new data to the database. Use it by 'add company (companyNumber)', it needs to be the companyNumber of Company House.")
     st.write('Features in development:')
-    st.write('1. Web Search')
-    st.write('2. Feed new file through chat to system')
-    st.write('3. Generate Company Profile PowerPoint')
+    st.write('1. Feed new file through chat to system')
+    st.write('2. Generate Company Profile PowerPoint')
 
 client = get_aoai_client()
+
+# ========================================
+def check_actions(prompt, client, deployment, k, ts, cs, model_profile) -> bool:
+
+    calls = maybe_route_to_action(prompt, client, deployment)
+
+    if not calls:
+        return False
+
+    for call in calls:
+        if call.function.name == "create_company_profile":
+            args = json.loads(call.function.arguments or "{}")
+            company = args.get("companyName") or "(unknown)"
+
+            if web_mode:
+                agent1 = profileAgentWeb(
+                    company,
+                    k=k, max_text_recall_size=ts, max_chars=cs, tool_choice={"type": "web_search"},
+                    model=model_profile, profile_prompt=st.session_state.profile_mod_web
+                )
+            else:
+                agent1 = WebAgent(
+                    company,
+                    k=k, max_text_recall_size=ts, max_chars=cs,
+                    model=model_profile, profile_prompt=st.session_state.profile_mod
+                )
+
+            out_pdf = agent1._rag_answer()
+
+            st.download_button(
+                "Download Profile PDF",
+                data=out_pdf,
+                file_name=f"{company}_profile.pdf",
+                mime="application/pdf",
+            )
+            st.success("Profile creation done.")
+            st.markdown(f"**Functionality in construction..**  (requested company: `{company}`)")
+
+            # Also persist this turn in the chat history so it shows up on rerun
+            st.session_state.history.append({
+                "q": prompt,
+                "a": f"Created a company profile for **{company}**. Use the button above to download the PDF."
+            })
+            return True
+        elif call.function.name == 'add_company':
+            args = json.loads(call.function.arguments or "{}")
+            companyNumber = args.get("companyNumber") or "(unknown)"
+            
+            try:
+                companyHouseListAdd(CompanyNumber = companyNumber)
+                st.success(f"Added {companyNumber} to internal list...")
+            except Exception as e:
+                print(f'Adding to internal list problem \n{e}')
+
+            try:
+                trigger_function(companyNumber = companyNumber)
+                st.success(f"Downloaded {companyNumber} files...")
+            except Exception as e:
+                print(f'Downloading file problem \n{e}')
+
+            try:
+                st.success("Running OCR and Vectorization, come back in 10 minutes ... ")
+                run_indexer()
+            except Exception as e:
+                print(f'OCR and Vector problem \n{e}')
+            
+            return True
+
+
+    return False
+
+def stream_answer(prompt: str):
+
+
+    agent = WebAgent(
+        k=k,
+        max_text_recall_size=ts,
+        # model=OPENAI_MODEL,
+        top=20,
+        # max_output_tokens=1200,
+        reasoning_effort=reasoning_effort,
+        verbosity=verbosity,
+        tool_choice="none",
+        streaming=do_stream,  # note: UI streaming (see note below)
+    )
+
+    answer_text = agent._answer(prompt)
+
+    st.session_state.history.append({"q": prompt, "a": answer_text})
+
+    ph = st.empty()
+    if do_stream:
+        buf = ""
+        for ch in answer_text:
+            buf += ch
+            ph.write(buf)
+            time.sleep(0.008)
+    else:
+        ph.write(answer_text)
+
+
+# Render prior turns every run so the conversation persists
+for turn in st.session_state.history:
+    with st.chat_message("user"):
+        st.write(turn["q"])
+    with st.chat_message("assistant"):
+        st.write(turn["a"])
+
+# Accept either a typed prompt or an injected one from sidebar suggestions
+typed = st.chat_input("Ask about the ingested PDFs…")
+pending = st.session_state.pop("pending_prompt", None)
+prompt = typed or pending
+
+if prompt:
+    with st.chat_message("user"):
+        st.write(prompt)
+    with st.chat_message("assistant"):
+        # Try tool routing first
+        model_profile = "gpt-5" #if model_profile_mod else "o3"
+        if check_actions(
+                prompt, client, AOAI_DEPLOYMENT,
+                k=k, ts=ts, cs=cs, model_profile=model_profile):
+            pass
+        else:
+            stream_answer(prompt)
